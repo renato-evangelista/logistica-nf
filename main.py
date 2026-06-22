@@ -34,22 +34,26 @@ async def receber_webhook(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Payload inválido")
 
-    evento = payload.get("evento") or payload.get("topic", "")
+    # O Omie envia o nome do evento no campo "topic"
+    evento = payload.get("topic", "")
 
-    # ── NF emitida ──────────────────────────────
-    if evento in ("nfe_emitida", "nfse_emitida", "nf_emitida"):
-        nf = payload.get("nfe") or payload.get("nfse") or payload.get("nota_fiscal") or payload
+    # ── NFe.NotaAutorizada ───────────────────────
+    # Disparado quando a NF é emitida e autorizada pela SEFAZ
+    if evento == "NFe.NotaAutorizada":
+        nf = payload.get("nfe") or payload
         salvar_nota(nf)
         return {"status": "ok", "acao": "nota_salva"}
 
-    # ── NF cancelada ────────────────────────────
-    elif evento in ("nfe_cancelada", "nfse_cancelada", "nf_cancelada"):
-        chave  = payload.get("chave_nfe") or payload.get("numero_nfse") or payload.get("chave")
+    # ── NFe.NotaCancelada ────────────────────────
+    # Disparado quando a NF é cancelada no Omie
+    elif evento == "NFe.NotaCancelada":
+        chave  = payload.get("chave_nfe") or payload.get("chave")
         motivo = payload.get("motivo_cancelamento") or payload.get("motivo") or "Não informado"
         cancelar_nota(chave, motivo)
         return {"status": "ok", "acao": "nota_cancelada"}
 
     # ── Evento não tratado ──────────────────────
+    # Omie pode disparar outros eventos — apenas loga e ignora
     else:
         print(f"⚠️  Evento não tratado: '{evento}' | payload: {payload}")
         return {"status": "ignorado", "evento": evento}
