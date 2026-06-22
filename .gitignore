@@ -1,0 +1,14 @@
+# Nunca suba credenciais para o GitHub!
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/

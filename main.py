@@ -1,0 +1,102 @@
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+from database import init_db, salvar_nota, cancelar_nota, listar_notas, relatorio_por_periodo, relatorio_cancelamentos
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Inicializa o banco quando o servidor sobe."""
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="Controle Logístico de NFs",
+    description="Recebe webhooks do Omie e armazena notas fiscais para controle logístico.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+
+# ─────────────────────────────────────────────
+# WEBHOOK — recebe eventos do Omie
+# ─────────────────────────────────────────────
+
+@app.post("/webhook/omie")
+async def receber_webhook(request: Request):
+    """
+    Endpoint que o Omie chama automaticamente ao emitir ou cancelar uma NF.
+    Configure no Omie: Configurações → Integrações → Webhooks
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payload inválido")
+
+    evento = payload.get("evento") or payload.get("topic", "")
+
+    # ── NF emitida ──────────────────────────────
+    if evento in ("nfe_emitida", "nfse_emitida", "nf_emitida"):
+        nf = payload.get("nfe") or payload.get("nfse") or payload.get("nota_fiscal") or payload
+        salvar_nota(nf)
+        return {"status": "ok", "acao": "nota_salva"}
+
+    # ── NF cancelada ────────────────────────────
+    elif evento in ("nfe_cancelada", "nfse_cancelada", "nf_cancelada"):
+        chave  = payload.get("chave_nfe") or payload.get("numero_nfse") or payload.get("chave")
+        motivo = payload.get("motivo_cancelamento") or payload.get("motivo") or "Não informado"
+        cancelar_nota(chave, motivo)
+        return {"status": "ok", "acao": "nota_cancelada"}
+
+    # ── Evento não tratado ──────────────────────
+    else:
+        print(f"⚠️  Evento não tratado: '{evento}' | payload: {payload}")
+        return {"status": "ignorado", "evento": evento}
+
+
+# ─────────────────────────────────────────────
+# ROTAS DE CONSULTA
+# ─────────────────────────────────────────────
+
+@app.get("/notas")
+def get_notas(
+    status: str = None,
+    data_inicio: str = None,
+    data_fim: str = None,
+):
+    """
+    Lista notas fiscais com filtros opcionais.
+    Exemplos:
+      GET /notas
+      GET /notas?status=emitida
+      GET /notas?status=cancelada&data_inicio=2024-01-01&data_fim=2024-12-31
+    """
+    notas = listar_notas(status=status, data_inicio=data_inicio, data_fim=data_fim)
+    return {"total": len(notas), "notas": notas}
+
+
+@app.get("/relatorio/periodo")
+def get_relatorio(data_inicio: str, data_fim: str):
+    """
+    Resumo de faturamento por cliente no período (exclui canceladas).
+    Exemplo: GET /relatorio/periodo?data_inicio=2024-01-01&data_fim=2024-12-31
+    """
+    dados = relatorio_por_periodo(data_inicio, data_fim)
+    return {"periodo": {"inicio": data_inicio, "fim": data_fim}, "clientes": dados}
+
+
+@app.get("/relatorio/cancelamentos")
+def get_cancelamentos(data_inicio: str, data_fim: str):
+    """
+    Resumo de cancelamentos no período.
+    Exemplo: GET /relatorio/cancelamentos?data_inicio=2024-01-01&data_fim=2024-12-31
+    """
+    dados = relatorio_cancelamentos(data_inicio, data_fim)
+    return {"periodo": {"inicio": data_inicio, "fim": data_fim}, "cancelamentos": dados}
+
+
+@app.get("/health")
+def health():
+    """Verificação rápida se o servidor está no ar."""
+    return {"status": "ok"}
