@@ -1,11 +1,30 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Any, Dict, Optional
 from database import init_db, salvar_nota, cancelar_nota, listar_notas, relatorio_por_periodo, relatorio_cancelamentos
 from contextlib import asynccontextmanager
 
 
+# ─────────────────────────────────────────────
+# MODELO DO WEBHOOK
+# Diz ao FastAPI o formato esperado do payload
+# Isso faz o campo "Request body" aparecer no /docs
+# ─────────────────────────────────────────────
+
+class WebhookOmie(BaseModel):
+    topic: str
+    nfe: Optional[Dict[str, Any]] = None
+    chave_nfe: Optional[str] = None
+    chave: Optional[str] = None
+    motivo_cancelamento: Optional[str] = None
+    motivo: Optional[str] = None
+
+    class Config:
+        extra = "allow"  # permite campos extras que o Omie possa enviar
+
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app):
     """Inicializa o banco quando o servidor sobe."""
     init_db()
     yield
@@ -24,31 +43,25 @@ app = FastAPI(
 # ─────────────────────────────────────────────
 
 @app.post("/webhook/omie")
-async def receber_webhook(request: Request):
+async def receber_webhook(payload: WebhookOmie):
     """
     Endpoint que o Omie chama automaticamente ao emitir ou cancelar uma NF.
     Configure no Omie: Configurações → Integrações → Webhooks
     """
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Payload inválido")
-
-    # O Omie envia o nome do evento no campo "topic"
-    evento = payload.get("topic", "")
+    evento = payload.topic
 
     # ── NFe.NotaAutorizada ───────────────────────
     # Disparado quando a NF é emitida e autorizada pela SEFAZ
     if evento == "NFe.NotaAutorizada":
-        nf = payload.get("nfe") or payload
+        nf = payload.nfe or payload.model_dump()
         salvar_nota(nf)
         return {"status": "ok", "acao": "nota_salva"}
 
     # ── NFe.NotaCancelada ────────────────────────
     # Disparado quando a NF é cancelada no Omie
     elif evento == "NFe.NotaCancelada":
-        chave  = payload.get("chave_nfe") or payload.get("chave")
-        motivo = payload.get("motivo_cancelamento") or payload.get("motivo") or "Não informado"
+        chave  = payload.chave_nfe or payload.chave
+        motivo = payload.motivo_cancelamento or payload.motivo or "Não informado"
         cancelar_nota(chave, motivo)
         return {"status": "ok", "acao": "nota_cancelada"}
 
