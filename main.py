@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 # ─────────────────────────────────────────────
 
 class WebhookOmie(BaseModel):
-    topic: str
+    topic: Optional[str] = None
     nfe: Optional[Dict[str, Any]] = None
     chave_nfe: Optional[str] = None
     chave: Optional[str] = None
@@ -48,7 +48,16 @@ async def receber_webhook(payload: WebhookOmie):
     Endpoint que o Omie chama automaticamente ao emitir ou cancelar uma NF.
     Configure no Omie: Configurações → Integrações → Webhooks
     """
+    # Ping de teste do Omie — só confirma que o servidor está no ar
+    if payload.topic is None or payload.topic == "":
+        return {"status": "ok", "acao": "ping_recebido"}
+
     evento = payload.topic
+
+    import json
+    print("=" * 60)
+    print(json.dumps(payload.model_dump(), indent=2, ensure_ascii=False))
+    print("=" * 60)
 
     # ── NFe.NotaAutorizada ───────────────────────
     # Disparado quando a NF é emitida e autorizada pela SEFAZ
